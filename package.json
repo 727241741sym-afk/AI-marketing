@@ -1,0 +1,14 @@
+{
+  "name": "atlas-research-saas",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "test:web": "node --test apps/web/src/lib/*.test.mjs",
+    "test:api": "cd apps/api && python -m pytest tests -q",
+    "test": "npm run test:web"
+  }
+}

@@ -1,0 +1,9 @@
+Atlas Research SaaS
+
+This product scaffold is designed to integrate with TauricResearch TradingAgents.
+TradingAgents is distributed under the Apache License 2.0:
+https://github.com/tauricresearch/tradingagents
+https://github.com/tauricresearch/tradingagents/blob/main/LICENSE
+
+Commercial deployments must preserve applicable license notices and attribution
+for TradingAgents and any other bundled open-source dependencies.
