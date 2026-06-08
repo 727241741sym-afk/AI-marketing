@@ -21,6 +21,7 @@ const analystOptions = [
   { id: "market", label: "市場" },
   { id: "news", label: "新聞" },
   { id: "fundamentals", label: "基本面" },
+  { id: "social", label: "社群" },
   { id: "risk", label: "風險" },
 ];
 
