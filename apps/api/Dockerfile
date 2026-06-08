@@ -10,14 +10,14 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml ./
-ARG INSTALL_TRADINGAGENTS=false
+COPY app ./app
+ARG INSTALL_TRADINGAGENTS=true
 RUN if [ "$INSTALL_TRADINGAGENTS" = "true" ]; then \
     pip install --no-cache-dir -e ".[tradingagents]"; \
   else \
     pip install --no-cache-dir -e .; \
   fi
 
-COPY app ./app
 COPY tests ./tests
 
 EXPOSE 8000

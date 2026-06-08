@@ -49,12 +49,29 @@ class SubscriptionOut(BaseModel):
     monthly_reports: int = Field(alias="monthlyReports")
     period_reports_used: int = Field(alias="periodReportsUsed")
     remaining_reports: int = Field(alias="remainingReports")
+    stripe_customer_id: str | None = Field(alias="stripeCustomerId", default=None)
 
     model_config = {"populate_by_name": True}
 
 
 class PortalOut(BaseModel):
     url: str
+
+
+class WatchlistItemCreate(BaseModel):
+    ticker: str = Field(min_length=1, max_length=12)
+    company_name: str = Field(alias="companyName", min_length=1, max_length=120)
+
+    model_config = {"populate_by_name": True}
+
+
+class WatchlistItemOut(BaseModel):
+    id: str
+    ticker: str
+    company_name: str = Field(alias="companyName")
+    created_at: datetime = Field(alias="createdAt")
+
+    model_config = {"populate_by_name": True}
 
 
 class WebhookOut(BaseModel):

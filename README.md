@@ -4,9 +4,9 @@
 
 ## 架構
 
-- `apps/web`: Next.js App Router 前端，所有產品 UI 文案使用繁體中文。
-- `apps/api`: FastAPI 後端，封裝研究任務、配額、Stripe Billing webhook 與 TradingAgents adapter。
-- `infra/postgres`: 商業版資料表 schema，涵蓋 users、subscriptions、research_runs、reports、watchlist_items、usage_events。
+- `apps/web`: Next.js App Router 前端，使用 Supabase SSR Auth，所有產品 UI 文案使用繁體中文。
+- `apps/api`: FastAPI 後端，驗證 Supabase bearer token，封裝研究任務、配額、Stripe Billing webhook、RQ queue/worker 與 TradingAgents adapter。
+- `infra/postgres`: Atlas 專用 `atlas_` Postgres schema，涵蓋 profiles、subscriptions、research_runs、reports、watchlist_items、usage_events。
 - `docker-compose.yml`: Postgres、Redis、API、Web 的本地部署拓撲。
 
 ## 本地開發
@@ -17,13 +17,22 @@
 cp .env.example .env
 ```
 
-2. 安裝前端依賴：
+2. 在 `.env` 填入 Supabase URL 與 publishable key，並讓前後端共用同一組設定：
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_xxx
+```
+
+3. 安裝前端依賴：
 
 ```bash
 npm install
 ```
 
-3. 安裝後端依賴：
+4. 安裝後端依賴：
 
 ```bash
 cd apps/api
@@ -32,15 +41,14 @@ python -m venv .venv
 pip install -e ".[dev]"
 ```
 
-4. 啟動服務：
+5. 啟動服務：
 
 ```bash
-docker compose up postgres redis
+docker compose up postgres redis api worker
 npm run dev:web
-cd apps/api && uvicorn app.main:app --reload --port 8000
 ```
 
-`DEMO_MODE=true` 時後端會使用內建示範研究結果，不需要真實 OpenAI/Finnhub/Reddit/TradingAgents keys。Production 接入上游引擎時改用：
+本機 Docker Postgres 會載入 `infra/postgres/001_init.sql`，建立 `atlas_` 表、RLS policies 與本地 auth stub。Docker API/worker 預設安裝上游 TradingAgents；若只想快速測 UI，可設定 `DEMO_MODE=true` 與 `QUEUE_BACKEND=inline`。
 
 ```bash
 pip install -e ".[dev,tradingagents]"
@@ -53,7 +61,7 @@ npm run test:web
 cd apps/api && python -m pytest tests -q
 ```
 
-目前測試覆蓋配額限制、訂閱狀態、TradingAgents 結果轉換與前端用量格式化。
+目前測試覆蓋 Supabase token 拒絕、用戶隔離、配額限制、Stripe webhook 邊界、Postgres/RLS SQL、TradingAgents 結果轉換與前端用量格式化。
 
 ## 商業化邊界
 
@@ -77,4 +85,19 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 state, decision = graph.propagate(ticker, report_date)
 ```
 
+Staging 預設使用 MiniMax M3：
+
+```bash
+TRADINGAGENTS_LLM_PROVIDER=minimax
+TRADINGAGENTS_DEEP_THINK_LLM=MiniMax-M3
+TRADINGAGENTS_QUICK_THINK_LLM=MiniMax-M3
+TRADINGAGENTS_LLM_BACKEND_URL=https://api.minimax.io/v1
+TRADINGAGENTS_OUTPUT_LANGUAGE=Traditional Chinese
+MINIMAX_API_KEY=...
+```
+
 回傳結果會轉成繁體中文產品需要的四個區塊：多頭觀點、空頭觀點、風險辯論、最終綜合。
+
+## Staging
+
+Vercel 只部署 `apps/web` preview；FastAPI API 與 RQ worker 由 Railway 容器承載。詳細步驟見 `docs/staging.md`。

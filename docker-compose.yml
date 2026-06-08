@@ -19,14 +19,55 @@ services:
   api:
     build:
       context: ./apps/api
+      args:
+        INSTALL_TRADINGAGENTS: ${INSTALL_TRADINGAGENTS:-true}
     env_file:
       - .env
     environment:
       FRONTEND_URL: http://localhost:3000
-      DATABASE_URL: postgresql+psycopg://atlas:atlas@postgres:5432/atlas_research
+      REPOSITORY_BACKEND: postgres
+      QUEUE_BACKEND: rq
+      RQ_QUEUE_NAME: atlas-research
+      DEMO_MODE: "false"
+      DATABASE_URL: postgresql://atlas:atlas@postgres:5432/atlas_research
       REDIS_URL: redis://redis:6379/0
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      TRADINGAGENTS_LLM_PROVIDER: ${TRADINGAGENTS_LLM_PROVIDER:-minimax}
+      TRADINGAGENTS_DEEP_THINK_LLM: ${TRADINGAGENTS_DEEP_THINK_LLM:-MiniMax-M3}
+      TRADINGAGENTS_QUICK_THINK_LLM: ${TRADINGAGENTS_QUICK_THINK_LLM:-MiniMax-M3}
+      TRADINGAGENTS_LLM_BACKEND_URL: ${TRADINGAGENTS_LLM_BACKEND_URL:-https://api.minimax.io/v1}
+      TRADINGAGENTS_OUTPUT_LANGUAGE: ${TRADINGAGENTS_OUTPUT_LANGUAGE:-Traditional Chinese}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
     ports:
       - "8000:8000"
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build:
+      context: ./apps/api
+      args:
+        INSTALL_TRADINGAGENTS: ${INSTALL_TRADINGAGENTS:-true}
+    env_file:
+      - .env
+    command: python -m app.worker
+    environment:
+      REPOSITORY_BACKEND: postgres
+      QUEUE_BACKEND: rq
+      RQ_QUEUE_NAME: atlas-research
+      DEMO_MODE: "false"
+      DATABASE_URL: postgresql://atlas:atlas@postgres:5432/atlas_research
+      REDIS_URL: redis://redis:6379/0
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      TRADINGAGENTS_LLM_PROVIDER: ${TRADINGAGENTS_LLM_PROVIDER:-minimax}
+      TRADINGAGENTS_DEEP_THINK_LLM: ${TRADINGAGENTS_DEEP_THINK_LLM:-MiniMax-M3}
+      TRADINGAGENTS_QUICK_THINK_LLM: ${TRADINGAGENTS_QUICK_THINK_LLM:-MiniMax-M3}
+      TRADINGAGENTS_LLM_BACKEND_URL: ${TRADINGAGENTS_LLM_BACKEND_URL:-https://api.minimax.io/v1}
+      TRADINGAGENTS_OUTPUT_LANGUAGE: ${TRADINGAGENTS_OUTPUT_LANGUAGE:-Traditional Chinese}
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY:-}
     depends_on:
       - postgres
       - redis
@@ -35,7 +76,10 @@ services:
     build:
       context: ./apps/web
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://api:8000
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
+      NEXT_PUBLIC_APP_ENV: development
+      NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}
     ports:
       - "3000:3000"
     depends_on:

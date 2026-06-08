@@ -20,11 +20,13 @@ export function AppShell({
   active,
   title,
   description,
+  userEmail,
   children,
 }: {
   active: string;
   title: string;
   description: string;
+  userEmail: string;
   children: React.ReactNode;
 }) {
   return (
@@ -64,8 +66,11 @@ export function AppShell({
             <p>{description}</p>
           </div>
           <div className="user-chip">
-            <span>Pro 方案</span>
-            <strong>demo-user</strong>
+            <span>已登入</span>
+            <strong>{userEmail}</strong>
+            <form action="/auth/signout" method="post">
+              <button type="submit">登出</button>
+            </form>
           </div>
         </header>
         {children}

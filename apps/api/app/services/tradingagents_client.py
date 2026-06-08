@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -49,6 +50,33 @@ def _demo_result(ticker: str, report_date: date, depth: ResearchDepth) -> Tradin
     )
 
 
+def _provider_key_name(provider: str) -> str | None:
+    return {
+        "minimax": "MINIMAX_API_KEY",
+        "minimax-cn": "MINIMAX_CN_API_KEY",
+        "openai": "OPENAI_API_KEY",
+    }.get(provider.lower())
+
+
+def _assert_provider_key_configured() -> None:
+    key_name = _provider_key_name(settings.tradingagents_llm_provider)
+    if key_name and not os.getenv(key_name):
+        raise RuntimeError(
+            f"{key_name} is not set. Add it to the API/worker environment before running TradingAgents."
+        )
+
+
+def _rounds_for_depth(depth: ResearchDepth) -> tuple[int, int]:
+    if depth is ResearchDepth.quick:
+        return 1, 1
+    if depth is ResearchDepth.deep:
+        return (
+            max(settings.tradingagents_max_debate_rounds, 3),
+            max(settings.tradingagents_max_risk_rounds, 3),
+        )
+    return settings.tradingagents_max_debate_rounds, settings.tradingagents_max_risk_rounds
+
+
 def run_tradingagents_research(
     *,
     ticker: str,
@@ -59,6 +87,8 @@ def run_tradingagents_research(
     if settings.demo_mode:
         return _demo_result(ticker, report_date, depth)
 
+    _assert_provider_key_configured()
+
     try:
         from tradingagents.default_config import DEFAULT_CONFIG
         from tradingagents.graph.trading_graph import TradingAgentsGraph
@@ -68,12 +98,22 @@ def run_tradingagents_research(
         ) from exc
 
     result_dir = Path(settings.tradingagents_results_dir)
+    cache_dir = Path(settings.tradingagents_cache_dir)
     result_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
 
+    debate_rounds, risk_rounds = _rounds_for_depth(depth)
     config = DEFAULT_CONFIG.copy()
     config["results_dir"] = str(result_dir)
-    config["max_debate_rounds"] = 1 if depth is ResearchDepth.quick else 2
-    config["max_risk_discuss_rounds"] = 1 if depth is not ResearchDepth.deep else 2
+    config["data_cache_dir"] = str(cache_dir)
+    config["llm_provider"] = settings.tradingagents_llm_provider
+    config["deep_think_llm"] = settings.tradingagents_deep_think_llm
+    config["quick_think_llm"] = settings.tradingagents_quick_think_llm
+    config["backend_url"] = settings.tradingagents_llm_backend_url or None
+    config["output_language"] = settings.tradingagents_output_language
+    config["checkpoint_enabled"] = settings.tradingagents_checkpoint_enabled
+    config["max_debate_rounds"] = debate_rounds
+    config["max_risk_discuss_rounds"] = risk_rounds
 
     graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
     state, decision = graph.propagate(ticker, report_date.isoformat())
@@ -83,6 +123,6 @@ def run_tradingagents_research(
     return TradingAgentsRawResult(
         state=state,
         decision=str(decision),
-        sources=["TradingAgents", "Finnhub", "Yahoo Finance", "Reddit"],
+        sources=["TradingAgents", "MiniMax M3", "Finnhub", "Yahoo Finance", "Reddit"],
         cost_cents=0,
     )

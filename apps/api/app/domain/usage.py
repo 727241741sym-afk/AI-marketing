@@ -18,6 +18,8 @@ class SubscriptionState:
     status: str
     period_reports_used: int
     quota: PlanQuota
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
 
 
 @dataclass(frozen=True)
