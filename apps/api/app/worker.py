@@ -10,6 +10,19 @@ from app.repository import ResearchRepository, repository
 from app.services.tradingagents_client import run_tradingagents_research
 
 
+def _job_run_id(job: Job) -> str | None:
+    if not job.args:
+        return None
+    return str(job.args[0])
+
+
+def _fail_job_run(job: Job, message: str) -> None:
+    run_id = _job_run_id(job)
+    if run_id is None:
+        return
+    repository.fail_run(run_id, message)
+
+
 def process_research_run(run_id: str, repo: ResearchRepository | None = None) -> None:
     active_repo = repo or repository
     run = active_repo.mark_running(run_id)
@@ -40,15 +53,39 @@ def mark_research_run_failed(
     exception_value: BaseException,
     _traceback: object,
 ) -> None:
-    if not job.args:
-        return
-    run_id = str(job.args[0])
-    repository.fail_run(run_id, f"{exception_type.__name__}: {exception_value}")
+    _fail_job_run(job, f"{exception_type.__name__}: {exception_value}")
+
+
+def mark_research_run_exception(
+    job: Job,
+    exception_type: type[BaseException],
+    exception_value: BaseException,
+    _traceback: object,
+) -> bool:
+    _fail_job_run(job, f"{exception_type.__name__}: {exception_value}")
+    return True
+
+
+def mark_research_run_killed(
+    job: Job,
+    _retpid: int | None,
+    _ret_val: int | None,
+    _rusage: object,
+) -> None:
+    _fail_job_run(
+        job,
+        "研究任務超過執行時間限制，worker 已終止。請降低分析深度或稍後重試。",
+    )
 
 
 def run_worker() -> None:
     connection = Redis.from_url(settings.redis_url)
-    worker = Worker([settings.rq_queue_name], connection=connection)
+    worker = Worker(
+        [settings.rq_queue_name],
+        connection=connection,
+        exception_handlers=[mark_research_run_exception],
+        work_horse_killed_handler=mark_research_run_killed,
+    )
     worker.work()
 
 

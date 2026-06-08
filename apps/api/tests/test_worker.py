@@ -60,3 +60,19 @@ def test_worker_marks_run_failed_on_timeout(monkeypatch):
     assert run is not None
     assert run.status == "failed"
     assert run.error_message == "research timed out"
+
+
+def test_work_horse_killed_marks_run_failed(monkeypatch):
+    repo = InMemoryRepository()
+    run_id = create_run(repo)
+    monkeypatch.setattr(worker_module, "repository", repo)
+
+    class FakeJob:
+        args = [run_id]
+
+    worker_module.mark_research_run_killed(FakeJob(), None, None, None)
+
+    run = repo.get_run_for_user("00000000-0000-0000-0000-000000000010", run_id)
+    assert run is not None
+    assert run.status == "failed"
+    assert "超過執行時間限制" in (run.error_message or "")
