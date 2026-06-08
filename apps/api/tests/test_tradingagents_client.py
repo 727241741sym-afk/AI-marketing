@@ -126,3 +126,20 @@ def test_deep_research_uses_high_quality_rounds(monkeypatch, tmp_path):
 
     assert captured["config"]["max_debate_rounds"] == 3
     assert captured["config"]["max_risk_discuss_rounds"] == 3
+    assert captured["analysts"] == ["market", "news", "fundamentals"]
+
+
+def test_web_only_risk_option_is_not_sent_as_tradingagents_analyst(monkeypatch, tmp_path):
+    captured = {}
+    install_fake_tradingagents(monkeypatch, captured)
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-key")
+    monkeypatch.setattr(tradingagents_client, "settings", fake_settings(tmp_path))
+
+    tradingagents_client.run_tradingagents_research(
+        ticker="AAPL",
+        report_date=date(2026, 6, 6),
+        depth=ResearchDepth.standard,
+        analysts=["risk"],
+    )
+
+    assert captured["analysts"] == ["market"]

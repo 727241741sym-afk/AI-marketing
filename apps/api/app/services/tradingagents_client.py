@@ -9,6 +9,8 @@ from typing import Any
 from app.config import settings
 from app.schemas import ResearchDepth
 
+TRADINGAGENTS_ANALYSTS = {"market", "news", "fundamentals", "social"}
+
 
 @dataclass(frozen=True)
 class TradingAgentsRawResult:
@@ -77,6 +79,11 @@ def _rounds_for_depth(depth: ResearchDepth) -> tuple[int, int]:
     return settings.tradingagents_max_debate_rounds, settings.tradingagents_max_risk_rounds
 
 
+def _selected_tradingagents_analysts(analysts: list[str]) -> list[str]:
+    selected = [analyst for analyst in analysts if analyst in TRADINGAGENTS_ANALYSTS]
+    return selected or ["market"]
+
+
 def run_tradingagents_research(
     *,
     ticker: str,
@@ -115,7 +122,11 @@ def run_tradingagents_research(
     config["max_debate_rounds"] = debate_rounds
     config["max_risk_discuss_rounds"] = risk_rounds
 
-    graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
+    graph = TradingAgentsGraph(
+        selected_analysts=_selected_tradingagents_analysts(analysts),
+        debug=False,
+        config=config,
+    )
     state, decision = graph.propagate(ticker, report_date.isoformat())
     if not isinstance(state, dict):
         state = {"raw_state": str(state)}
