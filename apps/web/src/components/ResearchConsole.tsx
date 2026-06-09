@@ -12,9 +12,11 @@ import {
   type Subscription,
   type WatchlistItem,
 } from "@/lib/api";
+import { printCurrentReport } from "@/lib/reportPrint.mjs";
 import { normalizeTicker } from "@/lib/usage.mjs";
 import { DownloadIcon, PlayIcon, PlusIcon } from "./Icons";
 import { QuotaMeter } from "./QuotaMeter";
+import { ReportContent, ReportMetadata } from "./ReportContent";
 import { StatusBadge } from "./StatusBadge";
 
 const analystOptions = [
@@ -123,6 +125,10 @@ export function ResearchConsole() {
   const quotaUsed = subscription?.periodReportsUsed ?? 0;
   const quotaLimit = subscription?.monthlyReports ?? 5;
 
+  function printReport() {
+    printCurrentReport();
+  }
+
   return (
     <div className="dashboard-grid">
       <section className="panel run-panel">
@@ -224,22 +230,21 @@ export function ResearchConsole() {
                 ? `${selectedReport.ticker} · ${selectedReport.reportDate}`
                 : "完成研究任務後會顯示最新報告。"}
             </p>
+            {selectedReport ? <ReportMetadata report={selectedReport} /> : null}
           </div>
-          <button className="secondary-action" disabled={!selectedReport} type="button">
+          <button
+            className="secondary-action no-print"
+            disabled={!selectedReport}
+            onClick={printReport}
+            type="button"
+          >
             <DownloadIcon size={17} />
             下載
           </button>
         </div>
         {selectedReport ? (
           <>
-            <div className="report-sections">
-              {Object.values(selectedReport.sections).map((section) => (
-                <article key={section.title}>
-                  <h3>{section.title}</h3>
-                  <p>{section.content}</p>
-                </article>
-              ))}
-            </div>
+            <ReportContent report={selectedReport} />
             <footer className="disclaimer">{selectedReport.disclaimer}</footer>
           </>
         ) : (
