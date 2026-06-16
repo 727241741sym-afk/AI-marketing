@@ -9,6 +9,7 @@ from app.domain.usage import UsageLimitError, remaining_reports
 from app.queue import ResearchQueueError, enqueue_research_run
 from app.repository import repository
 from app.schemas import (
+    CheckoutOut,
     PortalOut,
     ResearchRunCreate,
     ResearchRunOut,
@@ -18,8 +19,12 @@ from app.schemas import (
     WebhookOut,
 )
 from app.services.stripe_billing import (
+    StripeBillingCustomerError,
+    StripeBillingPriceError,
     StripeWebhookConfigError,
     StripeWebhookSignatureError,
+    create_checkout_url,
+    create_stripe_customer,
     create_customer_portal_url,
     parse_subscription_webhook,
     subscription_payload_from_event,
@@ -140,12 +145,39 @@ def delete_watchlist_item(
 @app.get("/api/billing/portal", response_model=PortalOut)
 def billing_portal(user: AuthenticatedUser = Depends(get_current_user)) -> PortalOut:
     state = repository.get_subscription(user.id)
-    return PortalOut(
-        url=create_customer_portal_url(
-            user_id=user.id,
-            stripe_customer_id=state.stripe_customer_id,
+    try:
+        return PortalOut(
+            url=create_customer_portal_url(
+                user_id=user.id,
+                stripe_customer_id=state.stripe_customer_id,
+            )
         )
-    )
+    except StripeBillingCustomerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.post("/api/billing/checkout", response_model=CheckoutOut)
+def billing_checkout(user: AuthenticatedUser = Depends(get_current_user)) -> CheckoutOut:
+    state = repository.get_subscription(user.id)
+    try:
+        stripe_customer_id = state.stripe_customer_id
+        if not stripe_customer_id:
+            created_customer_id = create_stripe_customer(user_id=user.id, email=user.email)
+            if created_customer_id:
+                state = repository.set_stripe_customer_for_user(user.id, created_customer_id)
+                stripe_customer_id = state.stripe_customer_id
+        return CheckoutOut(
+            url=create_checkout_url(
+                user_id=user.id,
+                stripe_customer_id=stripe_customer_id,
+            )
+        )
+    except StripeBillingPriceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except StripeBillingCustomerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/api/stripe/webhook", response_model=WebhookOut)
@@ -159,8 +191,13 @@ async def stripe_webhook(request: Request) -> WebhookOut:
     except StripeWebhookConfigError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
-    subscription_update = subscription_payload_from_event(event)
+    try:
+        subscription_update = subscription_payload_from_event(event)
+    except StripeBillingPriceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if subscription_update is not None:
-        repository.update_subscription_from_stripe(**subscription_update)
+        updated = repository.update_subscription_from_stripe(**subscription_update)
+        if not updated:
+            raise HTTPException(status_code=409, detail="找不到可關聯的 Stripe 訂閱使用者")
 
     return WebhookOut(received=True, eventType=event_type)

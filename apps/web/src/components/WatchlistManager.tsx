@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiRequest, type WatchlistItem } from "@/lib/api";
+import { normalizeTicker } from "@/lib/usage.mjs";
 import { PlusIcon } from "./Icons";
 
 export function WatchlistManager() {
@@ -10,6 +11,8 @@ export function WatchlistManager() {
   const [companyName, setCompanyName] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   async function refresh() {
     setItems(await apiRequest<WatchlistItem[]>("/api/watchlist"));
@@ -22,31 +25,41 @@ export function WatchlistManager() {
   }, []);
 
   async function addItem() {
-    if (!ticker.trim() || !companyName.trim()) {
+    const normalizedTicker = normalizeTicker(ticker);
+    if (!normalizedTicker || !companyName.trim() || adding) {
       return;
     }
 
+    setAdding(true);
     setError("");
     try {
       await apiRequest<WatchlistItem>("/api/watchlist", {
         method: "POST",
-        body: JSON.stringify({ ticker, companyName }),
+        body: JSON.stringify({ ticker: normalizedTicker, companyName: companyName.trim() }),
       });
       setTicker("");
       setCompanyName("");
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "新增觀察標的失敗");
+    } finally {
+      setAdding(false);
     }
   }
 
   async function deleteItem(id: string) {
+    if (deletingId) {
+      return;
+    }
+    setDeletingId(id);
     setError("");
     try {
       await apiRequest<void>(`/api/watchlist/${id}`, { method: "DELETE" });
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "刪除觀察標的失敗");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -71,9 +84,14 @@ export function WatchlistManager() {
           placeholder="公司名稱"
           value={companyName}
         />
-        <button className="primary-action compact-action" onClick={addItem} type="button">
+        <button
+          className="primary-action compact-action"
+          disabled={adding}
+          onClick={addItem}
+          type="button"
+        >
           <PlusIcon size={17} />
-          新增標的
+          {adding ? "新增中" : "新增標的"}
         </button>
       </div>
       {error ? <p className="form-message padded">{error}</p> : null}
@@ -85,8 +103,13 @@ export function WatchlistManager() {
             <strong>{item.ticker}</strong>
             <span>{item.companyName}</span>
             <span>下次研究：未排程</span>
-            <button className="secondary-action" onClick={() => deleteItem(item.id)} type="button">
-              移除
+            <button
+              className="secondary-action"
+              disabled={Boolean(deletingId)}
+              onClick={() => deleteItem(item.id)}
+              type="button"
+            >
+              {deletingId === item.id ? "移除中" : "移除"}
             </button>
           </div>
         ))}

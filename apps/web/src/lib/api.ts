@@ -1,6 +1,5 @@
 import { createClient } from "@/lib/supabase/client";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { apiPath } from "@/lib/apiPath.mjs";
 
 export type ApiDepth = "quick" | "standard" | "deep";
 export type ApiStatus = "queued" | "running" | "completed" | "failed";
@@ -12,6 +11,10 @@ export type Subscription = {
   periodReportsUsed: number;
   remainingReports: number;
   stripeCustomerId?: string | null;
+};
+
+export type CheckoutSession = {
+  url: string;
 };
 
 export type ResearchRun = {
@@ -66,7 +69,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     throw new Error("請先登入");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(apiPath(path), {
     ...options,
     headers: {
       "Content-Type": "application/json",

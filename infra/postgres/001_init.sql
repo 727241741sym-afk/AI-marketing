@@ -1,35 +1,6 @@
 create extension if not exists pgcrypto;
 
-create schema if not exists auth;
 create schema if not exists private;
-
-do $$
-begin
-  if not exists (select 1 from pg_roles where rolname = 'anon') then
-    create role anon;
-  end if;
-  if not exists (select 1 from pg_roles where rolname = 'authenticated') then
-    create role authenticated;
-  end if;
-  if not exists (select 1 from pg_roles where rolname = 'service_role') then
-    create role service_role;
-  end if;
-end;
-$$;
-
-create table if not exists auth.users (
-  id uuid primary key default gen_random_uuid(),
-  email text unique,
-  created_at timestamptz not null default now()
-);
-
-create or replace function auth.uid()
-returns uuid
-language sql
-stable
-as $$
-  select nullif(current_setting('request.jwt.claim.sub', true), '')::uuid
-$$;
 
 create table if not exists public.atlas_profiles (
   id uuid primary key references auth.users(id) on delete cascade,
@@ -121,12 +92,19 @@ alter table public.atlas_reports enable row level security;
 alter table public.atlas_watchlist_items enable row level security;
 alter table public.atlas_usage_events enable row level security;
 
-grant select, insert, update on public.atlas_profiles to authenticated;
-grant select, insert, update on public.atlas_subscriptions to authenticated;
-grant select, insert, update, delete on public.atlas_research_runs to authenticated;
-grant select, insert, update, delete on public.atlas_reports to authenticated;
-grant select, insert, update, delete on public.atlas_watchlist_items to authenticated;
-grant select, insert on public.atlas_usage_events to authenticated;
+grant select on public.atlas_profiles to authenticated;
+grant select on public.atlas_subscriptions to authenticated;
+grant select on public.atlas_research_runs to authenticated;
+grant select on public.atlas_reports to authenticated;
+grant select on public.atlas_watchlist_items to authenticated;
+grant select on public.atlas_usage_events to authenticated;
+
+revoke insert, update on public.atlas_profiles from authenticated;
+revoke insert, update on public.atlas_subscriptions from authenticated;
+revoke insert, update, delete on public.atlas_research_runs from authenticated;
+revoke insert, update, delete on public.atlas_reports from authenticated;
+revoke insert, update, delete on public.atlas_watchlist_items from authenticated;
+revoke insert on public.atlas_usage_events from authenticated;
 
 drop policy if exists "atlas_profiles_select_own" on public.atlas_profiles;
 create policy "atlas_profiles_select_own"
@@ -134,15 +112,7 @@ create policy "atlas_profiles_select_own"
   using ((select auth.uid()) = id);
 
 drop policy if exists "atlas_profiles_insert_own" on public.atlas_profiles;
-create policy "atlas_profiles_insert_own"
-  on public.atlas_profiles for insert to authenticated
-  with check ((select auth.uid()) = id);
-
 drop policy if exists "atlas_profiles_update_own" on public.atlas_profiles;
-create policy "atlas_profiles_update_own"
-  on public.atlas_profiles for update to authenticated
-  using ((select auth.uid()) = id)
-  with check ((select auth.uid()) = id);
 
 drop policy if exists "atlas_subscriptions_select_own" on public.atlas_subscriptions;
 create policy "atlas_subscriptions_select_own"
@@ -155,15 +125,7 @@ create policy "atlas_research_runs_select_own"
   using ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_research_runs_insert_own" on public.atlas_research_runs;
-create policy "atlas_research_runs_insert_own"
-  on public.atlas_research_runs for insert to authenticated
-  with check ((select auth.uid()) = user_id);
-
 drop policy if exists "atlas_research_runs_update_own" on public.atlas_research_runs;
-create policy "atlas_research_runs_update_own"
-  on public.atlas_research_runs for update to authenticated
-  using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_reports_select_own" on public.atlas_reports;
 create policy "atlas_reports_select_own"
@@ -171,9 +133,6 @@ create policy "atlas_reports_select_own"
   using ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_reports_insert_own" on public.atlas_reports;
-create policy "atlas_reports_insert_own"
-  on public.atlas_reports for insert to authenticated
-  with check ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_watchlist_select_own" on public.atlas_watchlist_items;
 create policy "atlas_watchlist_select_own"
@@ -181,20 +140,8 @@ create policy "atlas_watchlist_select_own"
   using ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_watchlist_insert_own" on public.atlas_watchlist_items;
-create policy "atlas_watchlist_insert_own"
-  on public.atlas_watchlist_items for insert to authenticated
-  with check ((select auth.uid()) = user_id);
-
 drop policy if exists "atlas_watchlist_update_own" on public.atlas_watchlist_items;
-create policy "atlas_watchlist_update_own"
-  on public.atlas_watchlist_items for update to authenticated
-  using ((select auth.uid()) = user_id)
-  with check ((select auth.uid()) = user_id);
-
 drop policy if exists "atlas_watchlist_delete_own" on public.atlas_watchlist_items;
-create policy "atlas_watchlist_delete_own"
-  on public.atlas_watchlist_items for delete to authenticated
-  using ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_usage_events_select_own" on public.atlas_usage_events;
 create policy "atlas_usage_events_select_own"
@@ -202,20 +149,17 @@ create policy "atlas_usage_events_select_own"
   using ((select auth.uid()) = user_id);
 
 drop policy if exists "atlas_usage_events_insert_own" on public.atlas_usage_events;
-create policy "atlas_usage_events_insert_own"
-  on public.atlas_usage_events for insert to authenticated
-  with check ((select auth.uid()) = user_id);
 
 create or replace function private.handle_new_atlas_user()
 returns trigger
 language plpgsql
 security definer
-set search_path = public, auth
+set search_path = ''
 as $$
 begin
   insert into public.atlas_profiles (id, email)
   values (new.id, new.email)
-  on conflict (id) do update set email = excluded.email, updated_at = now();
+  on conflict (id) do update set email = excluded.email, updated_at = pg_catalog.now();
 
   insert into public.atlas_subscriptions (user_id, plan, status, monthly_reports, period_reports_used)
   values (new.id, 'trial', 'trialing', 5, 0)

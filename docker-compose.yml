@@ -9,7 +9,8 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      - ./infra/postgres:/docker-entrypoint-initdb.d:ro
+      - ./infra/postgres/local/000_auth_stub.sql:/docker-entrypoint-initdb.d/000_auth_stub.sql:ro
+      - ./infra/postgres/001_init.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
 
   redis:
     image: redis:7
@@ -22,7 +23,8 @@ services:
       args:
         INSTALL_TRADINGAGENTS: ${INSTALL_TRADINGAGENTS:-true}
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       FRONTEND_URL: http://localhost:3000
       REPOSITORY_BACKEND: postgres
@@ -51,7 +53,8 @@ services:
       args:
         INSTALL_TRADINGAGENTS: ${INSTALL_TRADINGAGENTS:-true}
     env_file:
-      - .env
+      - path: .env
+        required: false
     command: python -m app.worker
     environment:
       REPOSITORY_BACKEND: postgres
@@ -74,9 +77,11 @@ services:
 
   web:
     build:
-      context: ./apps/web
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        API_BASE_URL: http://api:8000
     environment:
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
       NEXT_PUBLIC_APP_ENV: development
       NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:-}
       NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:-}

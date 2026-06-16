@@ -5,8 +5,7 @@
     "dockerfilePath": "Dockerfile"
   },
   "deploy": {
-    "startCommand": "uvicorn app.main:app --host 0.0.0.0 --port $PORT",
-    "healthcheckPath": "/healthz",
+    "startCommand": "python -m app.worker",
     "restartPolicyType": "ON_FAILURE"
   }
 }

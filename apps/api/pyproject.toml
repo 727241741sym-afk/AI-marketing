@@ -19,7 +19,7 @@ dev = [
   "pytest>=8.3.0",
 ]
 tradingagents = [
-  "tradingagents @ git+https://github.com/tauricresearch/tradingagents.git",
+  "tradingagents @ git+https://github.com/tauricresearch/tradingagents.git@c15200dc286b66abce3f1bcf09b298dc06b8539d",
 ]
 
 [tool.pytest.ini_options]

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   analystLabel,
   apiRequest,
@@ -13,6 +13,7 @@ import {
   type WatchlistItem,
 } from "@/lib/api";
 import { printCurrentReport } from "@/lib/reportPrint.mjs";
+import { latestCompletedRun } from "@/lib/reports.mjs";
 import { normalizeTicker } from "@/lib/usage.mjs";
 import { DownloadIcon, PlayIcon, PlusIcon } from "./Icons";
 import { QuotaMeter } from "./QuotaMeter";
@@ -47,28 +48,37 @@ export function ResearchConsole() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+  const refreshingRef = useRef(false);
 
   const companyNames = useMemo(() => {
     return new Map(watchlist.map((item) => [item.ticker, item.companyName]));
   }, [watchlist]);
 
   const refresh = useCallback(async () => {
+    if (refreshingRef.current) {
+      return;
+    }
+    refreshingRef.current = true;
     setError("");
-    const [nextSubscription, nextRuns, nextWatchlist] = await Promise.all([
-      apiRequest<Subscription>("/api/subscription"),
-      apiRequest<ResearchRun[]>("/api/research-runs"),
-      apiRequest<WatchlistItem[]>("/api/watchlist"),
-    ]);
+    try {
+      const [nextSubscription, nextRuns, nextWatchlist] = await Promise.all([
+        apiRequest<Subscription>("/api/subscription"),
+        apiRequest<ResearchRun[]>("/api/research-runs"),
+        apiRequest<WatchlistItem[]>("/api/watchlist"),
+      ]);
 
-    setSubscription(nextSubscription);
-    setRuns(nextRuns);
-    setWatchlist(nextWatchlist);
+      setSubscription(nextSubscription);
+      setRuns(nextRuns);
+      setWatchlist(nextWatchlist);
 
-    const reportRun = nextRuns.find((run) => run.status === "completed" && run.reportId);
-    if (reportRun?.reportId) {
-      setSelectedReport(await apiRequest<ResearchReport>(`/api/reports/${reportRun.reportId}`));
-    } else {
-      setSelectedReport(null);
+      const reportRun = latestCompletedRun(nextRuns) as ResearchRun | null;
+      if (reportRun?.reportId) {
+        setSelectedReport(await apiRequest<ResearchReport>(`/api/reports/${reportRun.reportId}`));
+      } else {
+        setSelectedReport(null);
+      }
+    } finally {
+      refreshingRef.current = false;
     }
   }, []);
 
@@ -137,9 +147,9 @@ export function ResearchConsole() {
             <h2>建立研究任務</h2>
             <p>輸入股票代號，選擇深度與代理組合。</p>
           </div>
-          <button className="icon-button" aria-label="新增觀察標的">
+          <a className="icon-button" aria-label="新增觀察標的" href="/watchlist">
             <PlusIcon size={18} />
-          </button>
+          </a>
         </div>
 
         <div className="run-form">

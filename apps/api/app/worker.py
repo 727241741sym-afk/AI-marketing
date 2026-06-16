@@ -44,6 +44,7 @@ def process_research_run(run_id: str, repo: ResearchRepository | None = None) ->
         active_repo.complete_run(run_id, report)
     except Exception as exc:
         active_repo.fail_run(run_id, str(exc))
+        raise
 
 
 def mark_research_run_failed(

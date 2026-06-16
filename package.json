@@ -7,8 +7,10 @@
   "scripts": {
     "dev:web": "npm --workspace apps/web run dev",
     "build:web": "npm --workspace apps/web run build",
+    "typecheck:web": "npm --workspace apps/web run typecheck",
+    "lint:web": "npm --workspace apps/web run lint",
     "test:web": "node --test apps/web/src/lib/*.test.mjs",
-    "test:api": "cd apps/api && python -m pytest tests -q",
-    "test": "npm run test:web"
+    "test:api": "cd apps/api && .venv\\Scripts\\python.exe -m pytest tests -q",
+    "test": "npm run test:web && npm run test:api"
   }
 }

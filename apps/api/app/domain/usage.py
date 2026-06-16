@@ -36,12 +36,16 @@ class UsageLimitError(Exception):
         self.remaining_reports = remaining_reports
 
 
-def remaining_reports(state: SubscriptionState) -> int:
-    return max(state.quota.monthly_reports - state.period_reports_used, 0)
+def remaining_reports(state: SubscriptionState, reserved_reports: int = 0) -> int:
+    return max(state.quota.monthly_reports - state.period_reports_used - reserved_reports, 0)
 
 
-def assert_can_start_research(state: SubscriptionState) -> UsageDecision:
-    remaining = remaining_reports(state)
+def assert_can_start_research(
+    state: SubscriptionState,
+    *,
+    reserved_reports: int = 0,
+) -> UsageDecision:
+    remaining = remaining_reports(state, reserved_reports)
     if state.status not in ACTIVE_SUBSCRIPTION_STATUSES:
         raise UsageLimitError("訂閱未啟用，請先更新付款方式", remaining)
 

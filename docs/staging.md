@@ -14,7 +14,10 @@ https://<vercel-preview-url>/auth/callback
 
 ## Railway
 
-建立同一 repo 的兩個 Railway services，兩者 Root Directory 都設為 `/apps/api`，Config File 設為 `/apps/api/railway.json`。
+建立同一 repo 的兩個 Railway services，兩者 Root Directory 都設為 `/apps/api`：
+
+- API service Config File：`/apps/api/railway.json`
+- Worker service Config File：`/apps/api/railway.worker.json`
 
 API service:
 
@@ -28,7 +31,7 @@ Worker service:
 python -m app.worker
 ```
 
-API service 可設定 HTTP healthcheck path `/healthz`；worker service 不設定 HTTP healthcheck。
+API service 已在 `railway.json` 設定 HTTP healthcheck path `/healthz`；worker service 不設定 HTTP healthcheck。
 
 Railway staging env:
 
@@ -40,7 +43,7 @@ QUEUE_BACKEND=rq
 RQ_QUEUE_NAME=atlas-research
 FRONTEND_URL=https://<vercel-preview-url>
 CORS_ORIGINS=https://<vercel-preview-url>
-CORS_ORIGIN_REGEX=https://.*\.vercel\.app
+CORS_ORIGIN_REGEX=
 DATABASE_URL=<Supabase pooled Postgres URL>
 REDIS_URL=<Railway Redis URL>
 SUPABASE_URL=https://vgjwrvjhlnevarvimmce.supabase.co
@@ -80,10 +83,16 @@ Preview env:
 
 ```text
 NEXT_PUBLIC_APP_ENV=staging
-NEXT_PUBLIC_API_BASE_URL=https://<railway-api-url>
+API_BASE_URL=https://<railway-api-url>
 NEXT_PUBLIC_SUPABASE_URL=https://vgjwrvjhlnevarvimmce.supabase.co
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<Supabase publishable key>
 ```
+
+`API_BASE_URL` 是 server-side rewrite 目標，不使用 `NEXT_PUBLIC_`，避免瀏覽器直接依賴 Railway CORS 或在漏設時打到使用者本機 `localhost`。
+
+## Supabase Migration
+
+Hosted Supabase 只套用 `infra/postgres/001_init.sql`。`infra/postgres/local/000_auth_stub.sql` 僅供本機 Docker Postgres 建立 `auth.users` stub 與 `auth.uid()`，不要套用到 hosted Supabase project。
 
 不要提交 `.vercel/`、`.env.local`、Railway token、Vercel token、MiniMax key、Supabase database password 或 Stripe secret。
 

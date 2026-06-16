@@ -15,6 +15,63 @@ class StripeWebhookSignatureError(Exception):
     pass
 
 
+class StripeBillingCustomerError(Exception):
+    pass
+
+
+class StripeBillingPriceError(Exception):
+    pass
+
+
+def create_stripe_customer(
+    *,
+    user_id: str,
+    email: str | None,
+) -> str | None:
+    if not settings.stripe_secret_key:
+        return None
+
+    import stripe
+
+    stripe.api_key = settings.stripe_secret_key
+    customer = stripe.Customer.create(
+        email=email,
+        metadata={"user_id": user_id},
+    )
+    return str(customer.id)
+
+
+def create_checkout_url(
+    *,
+    user_id: str,
+    stripe_customer_id: str | None,
+) -> str:
+    if not settings.stripe_secret_key:
+        return f"{settings.frontend_url}/billing?checkout=not-configured&user={user_id}"
+
+    if not settings.stripe_price_pro_monthly:
+        raise StripeBillingPriceError("Stripe Pro price id 尚未設定")
+    if not stripe_customer_id:
+        raise StripeBillingCustomerError("尚未建立 Stripe customer，請先稍後再試")
+
+    import stripe
+
+    stripe.api_key = settings.stripe_secret_key
+    session_params: dict[str, Any] = {
+        "mode": "subscription",
+        "line_items": [{"price": settings.stripe_price_pro_monthly, "quantity": 1}],
+        "success_url": f"{settings.frontend_url}/billing?checkout=success",
+        "cancel_url": f"{settings.frontend_url}/billing?checkout=cancelled",
+        "client_reference_id": user_id,
+        "metadata": {"user_id": user_id},
+        "subscription_data": {"metadata": {"user_id": user_id}},
+        "customer": stripe_customer_id,
+    }
+
+    session = stripe.checkout.Session.create(**session_params)
+    return str(session.url)
+
+
 def create_customer_portal_url(
     *,
     user_id: str,
@@ -24,7 +81,7 @@ def create_customer_portal_url(
         return f"{settings.frontend_url}/billing?portal=not-configured&user={user_id}"
 
     if not stripe_customer_id:
-        return f"{settings.frontend_url}/billing?portal=missing-customer"
+        raise StripeBillingCustomerError("尚未建立 Stripe customer，請先升級方案")
 
     import stripe
 
@@ -73,14 +130,19 @@ def subscription_payload_from_event(event: dict[str, Any]) -> dict[str, Any] | N
     stripe_subscription_id = obj.get("id")
     status = obj.get("status")
     price_id = _first_price_id(obj)
-    monthly_reports = PRO_MONTHLY_REPORTS if price_id == settings.stripe_price_pro_monthly else TRIAL_MONTHLY_REPORTS
+    if not price_id or price_id != settings.stripe_price_pro_monthly:
+        raise StripeBillingPriceError(f"Stripe price id 未設定或不支援：{price_id or 'missing'}")
+
+    metadata = obj.get("metadata", {})
+    user_id = metadata.get("user_id") if isinstance(metadata, dict) else None
 
     return {
         "stripe_customer_id": stripe_customer_id,
         "stripe_subscription_id": stripe_subscription_id if isinstance(stripe_subscription_id, str) else None,
         "status": status if isinstance(status, str) else "incomplete",
-        "plan": "pro" if monthly_reports == PRO_MONTHLY_REPORTS else "trial",
-        "monthly_reports": monthly_reports,
+        "plan": "pro",
+        "monthly_reports": PRO_MONTHLY_REPORTS,
+        "user_id": user_id if isinstance(user_id, str) and user_id else None,
     }
 
 

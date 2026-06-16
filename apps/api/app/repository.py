@@ -12,7 +12,7 @@ from psycopg_pool import ConnectionPool
 
 from app.config import settings
 from app.domain.report_mapper import ResearchReport
-from app.domain.usage import PlanQuota, SubscriptionState, next_usage_count
+from app.domain.usage import PlanQuota, SubscriptionState, assert_can_start_research, next_usage_count
 from app.schemas import ResearchDepth, ResearchRunCreate, ResearchStatus, WatchlistItemCreate
 
 
@@ -107,7 +107,15 @@ class ResearchRepository(Protocol):
         status: str,
         plan: str,
         monthly_reports: int,
+        user_id: str | None = None,
     ) -> bool:
+        ...
+
+    def set_stripe_customer_for_user(
+        self,
+        user_id: str,
+        stripe_customer_id: str,
+    ) -> SubscriptionState:
         ...
 
 
@@ -139,19 +147,12 @@ class InMemoryRepository:
     ) -> tuple[ResearchRunRecord, SubscriptionState]:
         with self._lock:
             current = self.get_subscription(user_id)
-            updated = SubscriptionState(
-                user_id=current.user_id,
-                plan=current.plan,
-                status=current.status,
-                period_reports_used=next_usage_count(current),
-                quota=current.quota,
-                stripe_customer_id=current.stripe_customer_id,
-            )
-            self._subscriptions[user_id] = updated
+            reserved_reports = self._active_run_count(user_id)
+            assert_can_start_research(current, reserved_reports=reserved_reports)
             run = ResearchRunRecord(
                 id=f"run_{uuid4().hex[:12]}",
                 user_id=user_id,
-                ticker=payload.ticker.strip().upper(),
+                ticker=payload.ticker,
                 report_date=payload.report_date,
                 depth=payload.depth,
                 analysts=payload.analysts,
@@ -159,7 +160,7 @@ class InMemoryRepository:
                 created_at=utc_now(),
             )
             self._runs[run.id] = run
-            return run, updated
+            return run, current
 
     def get_run_for_user(self, user_id: str, run_id: str) -> ResearchRunRecord | None:
         run = self._runs.get(run_id)
@@ -183,6 +184,16 @@ class InMemoryRepository:
     def complete_run(self, run_id: str, report: ResearchReport) -> ResearchRunRecord:
         with self._lock:
             run = self._runs[run_id]
+            current = self.get_subscription(run.user_id)
+            self._subscriptions[run.user_id] = SubscriptionState(
+                user_id=current.user_id,
+                plan=current.plan,
+                status=current.status,
+                period_reports_used=next_usage_count(current),
+                quota=current.quota,
+                stripe_customer_id=current.stripe_customer_id,
+                stripe_subscription_id=current.stripe_subscription_id,
+            )
             report_record = ReportRecord(
                 id=f"report_{uuid4().hex[:12]}",
                 user_id=run.user_id,
@@ -222,17 +233,19 @@ class InMemoryRepository:
         user_id: str,
         payload: WatchlistItemCreate,
     ) -> WatchlistItemRecord:
-        ticker = payload.ticker.strip().upper()
+        ticker = payload.ticker
+        company_name = payload.company_name
         with self._lock:
             for item in self._watchlist.values():
                 if item.user_id == user_id and item.ticker == ticker:
+                    item.company_name = company_name
                     return item
 
             item = WatchlistItemRecord(
                 id=f"watch_{uuid4().hex[:12]}",
                 user_id=user_id,
                 ticker=ticker,
-                company_name=payload.company_name.strip() or ticker,
+                company_name=company_name,
                 created_at=utc_now(),
             )
             self._watchlist[item.id] = item
@@ -254,21 +267,83 @@ class InMemoryRepository:
         status: str,
         plan: str,
         monthly_reports: int,
+        user_id: str | None = None,
     ) -> bool:
         with self._lock:
-            for user_id, current in self._subscriptions.items():
-                if current.stripe_customer_id == stripe_customer_id:
-                    self._subscriptions[user_id] = SubscriptionState(
+            for existing_user_id, current in self._subscriptions.items():
+                if (
+                    current.stripe_customer_id == stripe_customer_id
+                    or (
+                        stripe_subscription_id is not None
+                        and current.stripe_subscription_id == stripe_subscription_id
+                    )
+                ):
+                    self._subscriptions[existing_user_id] = SubscriptionState(
                         user_id=current.user_id,
                         plan=plan,
                         status=status,
                         period_reports_used=current.period_reports_used,
                         quota=PlanQuota(monthly_reports=monthly_reports),
                         stripe_customer_id=stripe_customer_id,
-                        stripe_subscription_id=stripe_subscription_id,
+                        stripe_subscription_id=stripe_subscription_id
+                        or current.stripe_subscription_id,
                     )
                     return True
+            if user_id:
+                current = self.get_subscription(user_id)
+                if (
+                    current.stripe_customer_id
+                    and current.stripe_customer_id != stripe_customer_id
+                ):
+                    return False
+                self._subscriptions[user_id] = SubscriptionState(
+                    user_id=current.user_id,
+                    plan=plan,
+                    status=status,
+                    period_reports_used=current.period_reports_used,
+                    quota=PlanQuota(monthly_reports=monthly_reports),
+                    stripe_customer_id=stripe_customer_id,
+                    stripe_subscription_id=stripe_subscription_id,
+                )
+                return True
         return False
+
+    def set_stripe_customer_for_user(
+        self,
+        user_id: str,
+        stripe_customer_id: str,
+    ) -> SubscriptionState:
+        with self._lock:
+            for existing_user_id, current in self._subscriptions.items():
+                if (
+                    existing_user_id != user_id
+                    and current.stripe_customer_id == stripe_customer_id
+                ):
+                    raise ValueError("Stripe customer 已綁定其他使用者")
+
+            current = self.get_subscription(user_id)
+            if current.stripe_customer_id:
+                return current
+
+            updated = SubscriptionState(
+                user_id=current.user_id,
+                plan=current.plan,
+                status=current.status,
+                period_reports_used=current.period_reports_used,
+                quota=current.quota,
+                stripe_customer_id=stripe_customer_id,
+                stripe_subscription_id=current.stripe_subscription_id,
+            )
+            self._subscriptions[user_id] = updated
+            return updated
+
+    def _active_run_count(self, user_id: str) -> int:
+        return sum(
+            1
+            for run in self._runs.values()
+            if run.user_id == user_id
+            and run.status in {ResearchStatus.queued, ResearchStatus.running}
+        )
 
 
 class PostgresRepository:
@@ -312,7 +387,7 @@ class PostgresRepository:
         run = ResearchRunRecord(
             id=f"run_{uuid4().hex[:12]}",
             user_id=user_id,
-            ticker=payload.ticker.strip().upper(),
+            ticker=payload.ticker,
             report_date=payload.report_date,
             depth=payload.depth,
             analysts=payload.analysts,
@@ -334,15 +409,18 @@ class PostgresRepository:
                     (user_id,),
                 ).fetchone()
                 current = _subscription_from_row(row)
-                used = next_usage_count(current)
-                conn.execute(
+                active_run_count = conn.execute(
                     """
-                    update public.atlas_subscriptions
-                    set period_reports_used = %s,
-                        updated_at = now()
+                    select count(*) as active_count
+                    from public.atlas_research_runs
                     where user_id = %s
+                      and status in ('queued', 'running')
                     """,
-                    (used, user_id),
+                    (user_id,),
+                ).fetchone()["active_count"]
+                assert_can_start_research(
+                    current,
+                    reserved_reports=int(active_run_count),
                 )
                 conn.execute(
                     """
@@ -362,34 +440,8 @@ class PostgresRepository:
                         run.created_at,
                     ),
                 )
-                conn.execute(
-                    """
-                    insert into public.atlas_usage_events (
-                      user_id, research_run_id, event_type, quantity, metadata
-                    )
-                    values (%s, %s, 'research_report', 1, %s)
-                    """,
-                    (
-                        user_id,
-                        run.id,
-                        Jsonb({
-                            "ticker": run.ticker,
-                            "depth": run.depth.value,
-                            "analysts": run.analysts,
-                        }),
-                    ),
-                )
 
-        updated = SubscriptionState(
-            user_id=current.user_id,
-            plan=current.plan,
-            status=current.status,
-            period_reports_used=used,
-            quota=current.quota,
-            stripe_customer_id=current.stripe_customer_id,
-            stripe_subscription_id=current.stripe_subscription_id,
-        )
-        return run, updated
+        return run, current
 
     def get_run_for_user(self, user_id: str, run_id: str) -> ResearchRunRecord | None:
         with self.pool.connection() as conn:
@@ -445,6 +497,27 @@ class PostgresRepository:
                     (run_id,),
                 ).fetchone()
                 run = _run_from_row(run_row)
+                subscription_row = conn.execute(
+                    """
+                    select user_id, plan, status, period_reports_used, monthly_reports,
+                           stripe_customer_id, stripe_subscription_id
+                    from public.atlas_subscriptions
+                    where user_id = %s
+                    for update
+                    """,
+                    (run.user_id,),
+                ).fetchone()
+                current = _subscription_from_row(subscription_row)
+                used = next_usage_count(current)
+                conn.execute(
+                    """
+                    update public.atlas_subscriptions
+                    set period_reports_used = %s,
+                        updated_at = now()
+                    where user_id = %s
+                    """,
+                    (used, run.user_id),
+                )
                 conn.execute(
                     """
                     insert into public.atlas_reports (id, user_id, run_id, report, created_at)
@@ -470,6 +543,25 @@ class PostgresRepository:
                     """,
                     (utc_now(), report_id, run_id),
                 ).fetchone()
+                conn.execute(
+                    """
+                    insert into public.atlas_usage_events (
+                      user_id, research_run_id, event_type, quantity, cost_cents, metadata
+                    )
+                    values (%s, %s, 'research_report_completed', 1, %s, %s)
+                    """,
+                    (
+                        run.user_id,
+                        run.id,
+                        report.cost_cents,
+                        Jsonb({
+                            "ticker": run.ticker,
+                            "depth": run.depth.value,
+                            "analysts": run.analysts,
+                            "reportId": report_id,
+                        }),
+                    ),
+                )
         return _run_from_row(row)
 
     def fail_run(self, run_id: str, message: str) -> ResearchRunRecord:
@@ -518,8 +610,8 @@ class PostgresRepository:
         user_id: str,
         payload: WatchlistItemCreate,
     ) -> WatchlistItemRecord:
-        ticker = payload.ticker.strip().upper()
-        company_name = payload.company_name.strip() or ticker
+        ticker = payload.ticker
+        company_name = payload.company_name
         with self.pool.connection() as conn:
             row = conn.execute(
                 """
@@ -554,30 +646,121 @@ class PostgresRepository:
         status: str,
         plan: str,
         monthly_reports: int,
+        user_id: str | None = None,
     ) -> bool:
         with self.pool.connection() as conn:
-            cursor = conn.execute(
-                """
-                update public.atlas_subscriptions
-                set stripe_subscription_id = coalesce(%s, stripe_subscription_id),
-                    status = %s,
-                    plan = %s,
-                    monthly_reports = %s,
-                    updated_at = now()
-                where stripe_customer_id = %s
-                   or stripe_subscription_id = %s
-                """,
-                (
-                    stripe_subscription_id,
-                    status,
-                    plan,
-                    monthly_reports,
-                    stripe_customer_id,
-                    stripe_subscription_id,
-                ),
-            )
-            conn.commit()
-        return cursor.rowcount > 0
+            with conn.transaction():
+                cursor = conn.execute(
+                    """
+                    update public.atlas_subscriptions
+                    set stripe_customer_id = %s,
+                        stripe_subscription_id = coalesce(%s, stripe_subscription_id),
+                        status = %s,
+                        plan = %s,
+                        monthly_reports = %s,
+                        updated_at = now()
+                    where stripe_customer_id = %s
+                       or stripe_subscription_id = %s
+                    """,
+                    (
+                        stripe_customer_id,
+                        stripe_subscription_id,
+                        status,
+                        plan,
+                        monthly_reports,
+                        stripe_customer_id,
+                        stripe_subscription_id,
+                    ),
+                )
+                if cursor.rowcount > 0:
+                    return True
+                if not user_id:
+                    return False
+                self._ensure_subscription(conn, user_id)
+                subscription_row = conn.execute(
+                    """
+                    select user_id, plan, status, period_reports_used, monthly_reports,
+                           stripe_customer_id, stripe_subscription_id
+                    from public.atlas_subscriptions
+                    where user_id = %s
+                    for update
+                    """,
+                    (user_id,),
+                ).fetchone()
+                current = _subscription_from_row(subscription_row)
+                if (
+                    current.stripe_customer_id
+                    and current.stripe_customer_id != stripe_customer_id
+                ):
+                    return False
+                conn.execute(
+                    """
+                    update public.atlas_subscriptions
+                    set stripe_customer_id = %s,
+                        stripe_subscription_id = %s,
+                        status = %s,
+                        plan = %s,
+                        monthly_reports = %s,
+                        updated_at = now()
+                    where user_id = %s
+                    """,
+                    (
+                        stripe_customer_id,
+                        stripe_subscription_id,
+                        status,
+                        plan,
+                        monthly_reports,
+                        user_id,
+                    ),
+                )
+                return True
+
+    def set_stripe_customer_for_user(
+        self,
+        user_id: str,
+        stripe_customer_id: str,
+    ) -> SubscriptionState:
+        with self.pool.connection() as conn:
+            with conn.transaction():
+                self._ensure_subscription(conn, user_id)
+                row = conn.execute(
+                    """
+                    select user_id, plan, status, period_reports_used, monthly_reports,
+                           stripe_customer_id, stripe_subscription_id
+                    from public.atlas_subscriptions
+                    where user_id = %s
+                    for update
+                    """,
+                    (user_id,),
+                ).fetchone()
+                current = _subscription_from_row(row)
+                if current.stripe_customer_id:
+                    return current
+
+                owner = conn.execute(
+                    """
+                    select user_id
+                    from public.atlas_subscriptions
+                    where stripe_customer_id = %s
+                      and user_id <> %s
+                    """,
+                    (stripe_customer_id, user_id),
+                ).fetchone()
+                if owner:
+                    raise ValueError("Stripe customer 已綁定其他使用者")
+
+                updated_row = conn.execute(
+                    """
+                    update public.atlas_subscriptions
+                    set stripe_customer_id = %s,
+                        updated_at = now()
+                    where user_id = %s
+                    returning user_id, plan, status, period_reports_used, monthly_reports,
+                              stripe_customer_id, stripe_subscription_id
+                    """,
+                    (stripe_customer_id, user_id),
+                ).fetchone()
+                return _subscription_from_row(updated_row)
 
     def _ensure_subscription(self, conn: Any, user_id: str) -> None:
         conn.execute(

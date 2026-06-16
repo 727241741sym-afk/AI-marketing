@@ -1,3 +1,4 @@
+import pytest
 from datetime import date
 
 from app import worker as worker_module
@@ -43,6 +44,8 @@ def test_worker_completes_research_run(monkeypatch):
     assert run is not None
     assert run.status == "completed"
     assert run.report_id is not None
+    subscription = repo.get_subscription("00000000-0000-0000-0000-000000000010")
+    assert subscription.period_reports_used == 1
 
 
 def test_worker_marks_run_failed_on_timeout(monkeypatch):
@@ -54,12 +57,15 @@ def test_worker_marks_run_failed_on_timeout(monkeypatch):
 
     monkeypatch.setattr(worker_module, "run_tradingagents_research", timeout_research)
 
-    worker_module.process_research_run(run_id, repo)
+    with pytest.raises(TimeoutError, match="research timed out"):
+        worker_module.process_research_run(run_id, repo)
 
     run = repo.get_run_for_user("00000000-0000-0000-0000-000000000010", run_id)
     assert run is not None
     assert run.status == "failed"
     assert run.error_message == "research timed out"
+    subscription = repo.get_subscription("00000000-0000-0000-0000-000000000010")
+    assert subscription.period_reports_used == 0
 
 
 def test_work_horse_killed_marks_run_failed(monkeypatch):

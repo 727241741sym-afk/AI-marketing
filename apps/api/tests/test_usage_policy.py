@@ -23,7 +23,7 @@ def test_active_subscription_with_available_quota_can_start_research():
     assert decision.message == "可建立研究任務"
 
 
-def test_quota_is_consumed_once_when_research_is_queued():
+def test_quota_is_consumed_once_when_research_completes():
     state = SubscriptionState(
         user_id="user_123",
         plan="pro",

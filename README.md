@@ -48,7 +48,7 @@ docker compose up postgres redis api worker
 npm run dev:web
 ```
 
-本機 Docker Postgres 會載入 `infra/postgres/001_init.sql`，建立 `atlas_` 表、RLS policies 與本地 auth stub。Docker API/worker 預設安裝上游 TradingAgents；若只想快速測 UI，可設定 `DEMO_MODE=true` 與 `QUEUE_BACKEND=inline`。
+本機 Docker Postgres 會先載入 `infra/postgres/local/000_auth_stub.sql`，再載入 `infra/postgres/001_init.sql` 建立 `atlas_` 表與 RLS policies。Hosted Supabase 只套用 `infra/postgres/001_init.sql`，不要覆寫 Supabase managed `auth` schema。Docker API/worker 預設安裝已 pin commit 的上游 TradingAgents；若只想快速測 UI，可設定 `DEMO_MODE=true` 與 `QUEUE_BACKEND=inline`。
 
 ```bash
 pip install -e ".[dev,tradingagents]"
