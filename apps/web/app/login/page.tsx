@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
+import { authErrorMessage } from "@/lib/authErrors.mjs";
 import { createClient } from "@/lib/supabase/client";
 import { hasSupabaseConfig } from "@/lib/supabase/config";
 
@@ -36,7 +37,7 @@ export default function LoginPage() {
     setLoading(false);
 
     if (result.error) {
-      setMessage(result.error.message);
+      setMessage(authErrorMessage(result.error));
       return;
     }
 
